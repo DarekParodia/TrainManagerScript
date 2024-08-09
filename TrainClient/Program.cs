@@ -31,6 +31,9 @@ namespace IngameScript
         
         List<IMyThrust> thrusterForward = new List<IMyThrust>();
         List<IMyThrust> thrusterBackward = new List<IMyThrust>();
+
+        private int lastSPeedCounter = 0;
+        private int maxSpeedSafetyTicks = 5; // after how many ticks stop thrusters if no new speed message is received
         private enum dataType : byte
         {
             PING = 0,
@@ -97,15 +100,16 @@ namespace IngameScript
             Echo("data: " + msg.data);
             
             string[] data = msg.data.Split(';');
-            float x = float.Parse(data[0]);
-            float y = float.Parse(data[1]);
             float z = float.Parse(data[2]);
-            // Vector3 speed = new Vector3(x, y, z);
-            // Echo("Speed: " + speed.ToString());
             
             // set thrusters
+            setThrusters(z);
+            lastSPeedCounter = 0;
+        }
 
-            if (z == 0)
+        private void setThrusters(float thrust)
+        {
+            if (thrust == 0)
             {
                 foreach (IMyThrust thruster in thrusterForward)
                 {
@@ -117,7 +121,7 @@ namespace IngameScript
                     thruster.ThrustOverridePercentage = 0;
                 }
             }
-            else if (z > 0)
+            else if (thrust > 0)
             {
                 foreach (IMyThrust thruster in thrusterForward)
                 {
@@ -125,42 +129,55 @@ namespace IngameScript
                 }
                 foreach (IMyThrust thruster in thrusterBackward)
                 {
-                    thruster.ThrustOverridePercentage = z;
+                    thruster.ThrustOverridePercentage = thrust;
                 }
             }
             else
             {
                 foreach (IMyThrust thruster in thrusterForward)
                 {
-                    thruster.ThrustOverridePercentage = -z;
+                    thruster.ThrustOverridePercentage = -thrust;
                 }
                 foreach (IMyThrust thruster in thrusterBackward)
                 {
                     thruster.ThrustOverridePercentage = 0;
                 }
             }
-            
         }
 
         public void Main(string argument, UpdateType updateSource)
         {
-            while (_broadcastReceiver.HasPendingMessage)
+            try
             {
-                MyIGCMessage myIGCMessage = _broadcastReceiver.AcceptMessage();
-                message msg = this.parseIGCMessage(myIGCMessage);
-                
-                if (msg.cargoID != Me.CubeGrid.CustomName && msg.cargoID != "all") // skip if message is not for this cargo
-                    continue;
-                
-                switch (msg.type)
+                lastSPeedCounter++;
+                if (lastSPeedCounter >= maxSpeedSafetyTicks)
                 {
-                    case dataType.PING:
-                        parsePingMessage(msg);
-                        break;
-                    case dataType.SPEED:
-                        parseSpeedMessage(msg);
-                        break;
+                    setThrusters(0);
                 }
+
+                while (_broadcastReceiver.HasPendingMessage)
+                {
+                    MyIGCMessage myIGCMessage = _broadcastReceiver.AcceptMessage();
+                    message msg = this.parseIGCMessage(myIGCMessage);
+
+                    if (msg.cargoID != Me.CubeGrid.CustomName &&
+                        msg.cargoID != "all") // skip if message is not for this cargo
+                        continue;
+
+                    switch (msg.type)
+                    {
+                        case dataType.PING:
+                            parsePingMessage(msg);
+                            break;
+                        case dataType.SPEED:
+                            parseSpeedMessage(msg);
+                            break;
+                    }
+                }
+            } catch (Exception e)
+            {
+                Echo("Error: " + e.Message);
+                setThrusters(0); // aditional safety if something crashes
             }
         }
     }
