@@ -24,7 +24,7 @@ namespace IngameScript
     {
         private string trainNameMOSI = "train_1_mosi"; // ID used to transmit IGC messages from host to client
         private string trainNameMISO = "train_1_miso"; // ID used to receive IGC messages from client to host
-        private string cockpitStringTag = "[TrainHost]"; // Tag used to identify the cockpit
+        private string cockpitStringTag = "[TrainHost]"; // Tag used to identify the cockpit (can be remote controller)
         
         IMyShipController cockpit;
         IMyBroadcastListener _broadcastReceiver;
@@ -52,7 +52,8 @@ namespace IngameScript
         private enum dataType : byte
         {
             PING = 0,
-            SPEED = 1
+            SPEED = 1,
+            DAMPENERS = 2
         }
 
         private List<cargo> cargo_list = new List<cargo>();
@@ -140,7 +141,11 @@ namespace IngameScript
             string speedString = speed.X + ";" + speed.Y + ";" + speed.Z;
             this.TransmitData(cargoID, dataType.SPEED, speedString);
         }
-
+        private void sendDampeners(string cargoID, bool dampeners)
+        {
+            string dampenersString = dampeners.ToString();
+            this.TransmitData(cargoID, dataType.DAMPENERS, dampenersString);
+        }
         public void AutoMode(string argument)
         {
 
@@ -151,6 +156,10 @@ namespace IngameScript
             // check if player is trying to move the train
             Vector3 MoveIndicator = cockpit.MoveIndicator;
             this.sendSpeed("all", MoveIndicator);
+            
+            // check if dampeners are on
+            bool dampeners = cockpit.DampenersOverride;
+            this.sendDampeners("all", dampeners);
         }
 
         public void Main(string argument, UpdateType updateSource)

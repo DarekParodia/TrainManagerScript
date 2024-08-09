@@ -26,8 +26,10 @@ namespace IngameScript
         private string trainNameMISO = "train_1_miso"; // ID used to receive IGC messages from client to host
         private string thrusterForwardGroup = "CargoOne.ThrusterForward"; // Group containing thrusters that will be used for going forward
         private string thrusterBackwardGroup = "CargoOne.ThrusterBackward"; // Group containing thrusters that will be used for going backward
+        private string cockpitStringTag = "[TrainClient]"; // Tag used to identify the cockpit (can be remote controller)
         
         IMyBroadcastListener _broadcastReceiver;
+        private IMyShipController _shipController;
         
         List<IMyThrust> thrusterForward = new List<IMyThrust>();
         List<IMyThrust> thrusterBackward = new List<IMyThrust>();
@@ -37,7 +39,8 @@ namespace IngameScript
         private enum dataType : byte
         {
             PING = 0,
-            SPEED = 1
+            SPEED = 1,
+            DAMPENERS = 2
         }
         private struct message
         {
@@ -67,6 +70,19 @@ namespace IngameScript
                     group.GetBlocksOfType(thrusterBackward);
                 }
             }
+            
+            // set ship controller
+            List<IMyTerminalBlock> blocks = new List<IMyTerminalBlock>();
+            GridTerminalSystem.GetBlocksOfType<IMyShipController>(blocks);
+            foreach (IMyTerminalBlock block in blocks)
+            {
+                if (block.CustomName.Contains(cockpitStringTag))
+                {
+                    _shipController = block as IMyShipController;
+                    break;
+                }
+            }
+            
             Echo("Train Client");
         }
         
@@ -105,6 +121,12 @@ namespace IngameScript
             // set thrusters
             setThrusters(z);
             lastSPeedCounter = 0;
+        }
+
+        private void parseDampenersMessage(message msg)
+        {
+            bool dampeners = bool.Parse(msg.data);
+            _shipController.DampenersOverride = dampeners;
         }
 
         private void setThrusters(float thrust)
@@ -171,6 +193,9 @@ namespace IngameScript
                             break;
                         case dataType.SPEED:
                             parseSpeedMessage(msg);
+                            break;
+                        case dataType.DAMPENERS:
+                            parseDampenersMessage(msg);
                             break;
                     }
                 }
