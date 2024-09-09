@@ -22,33 +22,37 @@ namespace IngameScript
 {
     partial class Program : MyGridProgram
     {
-        private string trainNameMOSI = "train_1_mosi"; // ID used to transmit IGC messages from host to client
-        private string trainNameMISO = "train_1_miso"; // ID used to receive IGC messages from client to host
+        private string trainNameMOSI = "train_1_mosi";   // ID used to transmit IGC messages from host to client
+        private string trainNameMISO = "train_1_miso";   // ID used to receive IGC messages from client to host
         private string cockpitStringTag = "[TrainHost]"; // Tag used to identify the cockpit (can be remote controller)
         
         IMyShipController cockpit;
         IMyBroadcastListener _broadcastReceiver;
         
-        private mode currentMode = mode.MANUAL;
-        
+        private mode currentMode = mode.AUTO;
+        private struct waypoint
+        {
+            public Vector3 position;
+            public float speed;
+            public string name;
+        }
         private struct message
         {
             public string cargoID;
             public dataType type;
             public string data;
         }
-
         private struct cargo
         {
             public string cargoID;
             public Vector3 position;
+            public float mass; // Total Mass of cargo from Sandbox.ModAPI.Ingame.MyShipMass
         }
         private enum mode
         {
             AUTO,
             MANUAL
         }
-
         private enum dataType : byte
         {
             PING = 0,
@@ -57,12 +61,18 @@ namespace IngameScript
         }
 
         private List<cargo> cargo_list = new List<cargo>();
+        private List<waypoint> Waypoints = new List<waypoint>(); // Add waypoints trough custom data. Format: just copy paste the coordinates from GPS + :speed
+        
+        private int currentWaypoint = 0;
+        private bool goUpList = true; // if true, go up the list of waypoints, if false go down
+        private int distanceThreshold = 10; // distance threshold to consider waypoint reached
+        
         int counter = 0;
         
         public Program()
         {
             Echo("Starting Train Host...");
-            Runtime.UpdateFrequency = UpdateFrequency.Update10;
+            Runtime.UpdateFrequency = UpdateFrequency.Update100;
             
             _broadcastReceiver = IGC.RegisterBroadcastListener(trainNameMISO);
             _broadcastReceiver.SetMessageCallback(trainNameMISO);
@@ -84,8 +94,51 @@ namespace IngameScript
                 throw new Exception("No cockpit found with tag: " + cockpitStringTag);
             }
             
+            // append waypoints from custom data
+            string customData = Me.CustomData;
+            string[] waypointsData = customData.Split('\n');
+            foreach (string waypointData in waypointsData)
+            {
+                string[] waypointDataSplit = waypointData.Split(':');
+                waypoint newWaypoint = new waypoint();
+                newWaypoint.position = new Vector3(float.Parse(waypointDataSplit[2]), float.Parse(waypointDataSplit[3]), float.Parse(waypointDataSplit[4]));
+                newWaypoint.speed = float.Parse(waypointDataSplit[6]);
+                newWaypoint.name = waypointDataSplit[1];
+                this.Waypoints.Add(newWaypoint);
+            }
+            
+            // log waypoints
+            Echo("Waypoint Count: " + this.Waypoints.Count);
+            Echo("Waypoints Initialized: ");
+            foreach (waypoint wp in this.Waypoints)
+            {
+                Echo(wp.position.ToString() + " " + wp.speed);
+            }
+    
+            Vector3 currentPosition = cockpit.GetPosition();
+            this.currentWaypoint = getClosestWaypoint(currentPosition);
+
             Echo("Train Host Active");
-            this.ping();
+        }
+        private int getClosestWaypoint(Vector3 currentPosition)
+        {
+            int closestWaypoint = 0;
+            float closestDistance = float.MaxValue;
+            for (int i = 0; i < this.Waypoints.Count; i++)
+            {
+                float distance = Vector3.Distance(currentPosition, this.Waypoints[i].position);
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    closestWaypoint = i;
+                }
+            }
+            return closestWaypoint;
+        }
+        
+        private bool hasReachedWaypoint(Vector3 currentPosition, Vector3 targetPosition)
+        {
+            return Vector3.Distance(currentPosition, targetPosition) < distanceThreshold;
         }
         private message parseIGCMessage(MyIGCMessage myIGCMessage)
         {
@@ -134,6 +187,8 @@ namespace IngameScript
             {
                 Echo(c.cargoID);
             }
+            
+            Runtime.UpdateFrequency = UpdateFrequency.Update10;
         }
 
         private void sendSpeed(string cargoID, Vector3 speed)
@@ -148,7 +203,50 @@ namespace IngameScript
         }
         public void AutoMode(string argument)
         {
-
+            if (this.Waypoints.Count < 2)
+            {
+                Echo("Not enough waypoints, at least 2 needed");
+                return;
+            }
+                
+            Vector3 currentPosition = cockpit.GetPosition();
+            
+            if (hasReachedWaypoint(currentPosition, Waypoints[currentWaypoint + (goUpList ? 1 : -1)].position))
+            {
+                if (goUpList)
+                {
+                    currentWaypoint++;
+                    if (currentWaypoint == Waypoints.Count - 1)
+                    {
+                        goUpList = false;
+                    }
+                }
+                else
+                {
+                    currentWaypoint--;
+                    if (currentWaypoint == 0)
+                    {
+                        goUpList = true;
+                    }
+                }
+            }
+            
+            Echo("Current Waypoint: " + Waypoints[currentWaypoint].name);
+            Echo("Direction: " + (goUpList ? "uplist" : "downlist"));
+            Echo("Target Waypoint: " + Waypoints[currentWaypoint + (goUpList ? 1 : -1)].name);
+            // distance to target
+            Vector3 targetPosition = Waypoints[currentWaypoint + (goUpList ? 1 : -1)].position;
+            float distance = Vector3.Distance(currentPosition, targetPosition);
+            Echo("Distance to target: " + distance);
+            
+            // calculate speed limit
+            float speedLimit = Waypoints[currentWaypoint].speed;
+            if (!goUpList)
+            {
+                speedLimit = Waypoints[currentWaypoint - 1].speed;
+            }
+            
+            Echo("Current Speed Limit: " + speedLimit);
         }
         
         public void ManualMode(string argument)
